@@ -1,6 +1,6 @@
 import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import { BASE, freshIp } from "./helpers";
+import { BASE, freshIp, loggedIn } from "./helpers";
 
 const CHUNK = new Uint8Array(64 * 1024).fill(0x61);
 
@@ -55,5 +55,18 @@ describe("request body limits", () => {
     );
     // Parsed and checked: a wrong password, not a size or JSON error.
     expect(res.status).toBe(401);
+  });
+
+  it("saves a note at the character limit in a language that takes 3 bytes per character", async () => {
+    const c = await loggedIn();
+    const content = "界".repeat(200_000); // 600 KB as UTF-8, over the old 512 KB route limit
+    const created = await c.call("/api/notes", { method: "POST", body: { title: "長いメモ", content } });
+    expect(created.status).toBe(201);
+    const { note } = await created.json<{ note: { id: string; content: string } }>();
+    expect(note.content.length).toBe(200_000);
+    const updated = await c.call(`/api/notes/${note.id}`, { method: "PATCH", body: { content: "語".repeat(200_000) } });
+    expect(updated.status).toBe(200);
+    const saved = await c.json<{ note: { content: string } }>(`/api/notes/${note.id}`);
+    expect(saved.note.content).toBe("語".repeat(200_000));
   });
 });
